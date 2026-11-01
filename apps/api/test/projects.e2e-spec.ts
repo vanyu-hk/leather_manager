@@ -13,7 +13,7 @@ describe('Projects API (e2e)', () => {
       create: async (body: unknown) => ({ id: 'project-1', ...(body as object), status: 'WISHLIST' }),
       list: async () => [],
       board: async () => ({ WISHLIST: [], IN_PROGRESS: [], COMPLETED: [] }),
-      updateStatus: async (id: string, status: string) => ({ id, status, completedAt: status === 'COMPLETED' ? new Date().toISOString() : null }),
+      updateStatus: async (id: string, status: string) => { if (id === 'archived') throw new Error('PROJECT_ARCHIVED'); return { id, status, completedAt: status === 'COMPLETED' ? new Date().toISOString() : null }; },
       remove: async (id: string) => { if (id === 'missing') throw new Error('PROJECT_NOT_FOUND'); },
       createAllocation: async (id: string, body: { materialId: string }) => { if (body.materialId === 'missing-material' || body.materialId === 'raced-material') throw new Error('MATERIAL_NOT_FOUND'); const error = Object.assign(new Error('库存不足，无法完成扣减。'), { code: 'INSUFFICIENT_STOCK' }); throw error; },
       updateAllocation: async () => ({}), removeAllocation: async () => undefined,
@@ -35,6 +35,7 @@ describe('Projects API (e2e)', () => {
     await request(app.getHttpServer()).post('/api/v1/projects/project-1/allocations').send({ materialId: 'missing-material', quantity: '0.35' }).expect(404).expect(({ body }) => expect(body).toEqual(expect.objectContaining({ code: 'MATERIAL_NOT_FOUND', message: '未找到该材料。' })));
     await request(app.getHttpServer()).post('/api/v1/projects/project-1/allocations').send({ materialId: 'raced-material', quantity: '0.35' }).expect(404).expect(({ body }) => expect(body).toEqual(expect.objectContaining({ code: 'MATERIAL_NOT_FOUND', message: '未找到该材料。' })));
     await request(app.getHttpServer()).post('/api/v1/projects/incomplete/finished-good').expect(409).expect(({ body }) => expect(body).toMatchObject({ code: 'PROJECT_NOT_COMPLETED', message: expect.any(String) }));
+    await request(app.getHttpServer()).patch('/api/v1/projects/archived/status').send({ status: 'WISHLIST' }).expect(409).expect(({ body }) => expect(body).toMatchObject({ code: 'PROJECT_ARCHIVED', message: expect.stringContaining('归档') }));
     await request(app.getHttpServer()).delete('/api/v1/projects/missing').expect(404).expect(({ body }) => expect(body).toMatchObject({ code: 'PROJECT_NOT_FOUND', message: expect.any(String) }));
   });
 
@@ -98,7 +99,7 @@ describePostgres('Projects allocation concurrency (Docker PostgreSQL required)',
       const project = await client.project.findUnique({ where: { id: projectId }, include: { allocations: true } }); const material = await client.material.findUniqueOrThrow({ where: { id: materialId } });
       const ledger = await client.inventoryMovement.aggregate({ where: { materialId }, _sum: { quantityDelta: true } });
       expect(project?.allocations.length ?? 0).toBe(await client.materialAllocation.count({ where: { projectId } }));
-      expect(Number(material.currentQuantity) + Number(ledger._sum.quantityDelta)).toBe(1);
+      expect(Number(material.currentQuantity) - Number(ledger._sum.quantityDelta)).toBe(1);
     } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); if (materialId) await client.material.delete({ where: { id: materialId } }).catch(() => undefined); await client.$disconnect(); }
   });
 
@@ -110,5 +111,22 @@ describePostgres('Projects allocation concurrency (Docker PostgreSQL required)',
       const [first, second] = await Promise.all([projects.createFinishedGood(projectId), projects.createFinishedGood(projectId)]);
       expect(first.id).toBe(second.id); expect(await client.finishedGood.count({ where: { sourceProjectId: projectId } })).toBe(1);
     } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); await client.$disconnect(); }
+  });
+
+  it('keeps completed finished-good project trace immutable without changing stock', async () => {
+    const { PrismaClient } = await import('@prisma/client'); const client = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });
+    const projects = new ProjectsService(client as never, new InventoryService(client as never)); let materialId: string | undefined; let projectId: string | undefined;
+    try {
+      materialId = (await client.material.create({ data: { name: '归档皮料', type: '植鞣革', color: '原色', unit: '平方英尺', currentQuantity: '1.00' } })).id;
+      projectId = (await projects.create({ name: '归档项目', type: '包袋', primaryColor: '原色' })).id as string;
+      const allocation = await projects.createAllocation(projectId, { materialId, quantity: '0.35' }); await projects.updateStatus(projectId, 'COMPLETED');
+      const good = await projects.createFinishedGood(projectId); const before = await client.material.findUniqueOrThrow({ where: { id: materialId } });
+      await expect(projects.updateStatus(projectId, 'WISHLIST')).rejects.toThrow('PROJECT_ARCHIVED');
+      await expect(projects.updateAllocation(projectId, allocation.id as string, { quantity: '0.50' })).rejects.toThrow('PROJECT_ARCHIVED');
+      await expect(projects.removeAllocation(projectId, allocation.id as string)).rejects.toThrow('PROJECT_ARCHIVED');
+      await expect(projects.remove(projectId)).rejects.toThrow('PROJECT_ARCHIVED');
+      expect(good).toMatchObject({ sourceProjectId: projectId, allocations: [expect.objectContaining({ materialId })] });
+      expect(String((await client.material.findUniqueOrThrow({ where: { id: materialId } })).currentQuantity)).toBe(String(before.currentQuantity));
+    } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); if (materialId) await client.material.delete({ where: { id: materialId } }).catch(() => undefined); await client.$disconnect(); }
   });
 });
