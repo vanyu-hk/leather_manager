@@ -15,7 +15,7 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-该命令启动 PostgreSQL，默认映射到本机 `5432` 端口。停止依赖可运行：
+该命令启动 PostgreSQL，默认仅绑定到本机回环地址 `127.0.0.1:5432`，不会暴露给局域网。停止依赖可运行：
 
 ```bash
 docker compose -f infra/docker-compose.yml down
