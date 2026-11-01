@@ -12,8 +12,8 @@ export class ProjectsController {
   @Get('board') board() { return this.projects.board(); }
   @Patch(':id/status') updateStatus(@Param('id') id: string, @Body() body: UpdateProjectStatusDto) { if (!['WISHLIST', 'IN_PROGRESS', 'COMPLETED'].includes(body.status)) this.bad('INVALID_PROJECT_STATUS', '项目状态无效。'); return this.handle(() => this.projects.updateStatus(id, body.status)); }
   @Delete(':id') async remove(@Param('id') id: string) { await this.handle(() => this.projects.remove(id)); return { ok: true }; }
-  @Post(':id/allocations') createAllocation(@Param('id') id: string, @Body() body: CreateAllocationDto) { this.assertAllocation(body); return this.handle(() => this.projects.createAllocation(id, body)); }
-  @Patch(':id/allocations/:allocationId') updateAllocation(@Param('id') id: string, @Param('allocationId') allocationId: string, @Body() body: UpdateAllocationDto) { this.assertAllocation(body); return this.handle(() => this.projects.updateAllocation(id, allocationId, body)); }
+  @Post(':id/allocations') createAllocation(@Param('id') id: string, @Body() body: CreateAllocationDto) { this.assertAllocation(body, true); return this.handle(() => this.projects.createAllocation(id, body)); }
+  @Patch(':id/allocations/:allocationId') updateAllocation(@Param('id') id: string, @Param('allocationId') allocationId: string, @Body() body: UpdateAllocationDto) { this.assertAllocation(body, false); return this.handle(() => this.projects.updateAllocation(id, allocationId, body)); }
   @Delete(':id/allocations/:allocationId') async removeAllocation(@Param('id') id: string, @Param('allocationId') allocationId: string) { await this.handle(() => this.projects.removeAllocation(id, allocationId)); return { ok: true }; }
   @Post(':id/finished-good') createFinishedGood(@Param('id') id: string) { return this.handle(() => this.projects.createFinishedGood(id)); }
 
@@ -31,6 +31,6 @@ export class ProjectsController {
     }
   }
   private assertProject(body: CreateProjectDto): void { if (![body.name, body.type, body.primaryColor].every((value) => typeof value === 'string' && value.trim())) this.bad('INVALID_PROJECT_INPUT', '项目名称、类型和主色不能为空。'); }
-  private assertAllocation(body: { materialId?: string; quantity?: string }): void { try { if (!body.materialId?.trim() || cents(body.quantity) <= 0n) this.bad('INVALID_ALLOCATION_QUANTITY', '领料数量必须大于零。'); } catch { this.bad('INVALID_ALLOCATION_QUANTITY', '领料数量必须大于零。'); } }
+  private assertAllocation(body: { materialId?: string; quantity?: string }, requireMaterial: boolean): void { try { if ((requireMaterial && !body.materialId?.trim()) || cents(body.quantity) <= 0n) this.bad('INVALID_ALLOCATION_QUANTITY', '领料数量必须大于零。'); } catch { this.bad('INVALID_ALLOCATION_QUANTITY', '领料数量必须大于零。'); } }
   private bad(code: string, message: string): never { throw new HttpException({ code, message }, HttpStatus.BAD_REQUEST); }
 }

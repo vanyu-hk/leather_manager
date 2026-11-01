@@ -36,16 +36,17 @@ export class ProjectsService {
   }
 
   async updateStatus(id: string, status: ProjectStatus): Promise<Record<string, unknown>> {
-    return this.db.$transaction(async (tx) => {
-      const project = await tx.project.findUnique({ where: { id } });
+    return this.serializable(async (tx) => {
+      const project = await tx.project.findUnique({ where: { id }, include: { finishedGood: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
+      if (project.finishedGood) throw new Error('PROJECT_ARCHIVED');
       return tx.project.update({ where: { id }, data: { status, completedAt: status === 'COMPLETED' ? new Date() : null } });
     });
   }
 
   async remove(id: string): Promise<void> {
     await this.serializable(async (tx) => {
-      const project = await tx.project.findUnique({ where: { id }, include: { allocations: true } });
+      const project = await tx.project.findUnique({ where: { id }, include: { allocations: true, finishedGood: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
       this.assertMutable(project);
       for (const allocation of project.allocations) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId: id, allocationId: allocation.id });
@@ -57,7 +58,7 @@ export class ProjectsService {
     const allocationQuantity = quantity(input.quantity);
     try {
       return await this.serializable(async (tx) => {
-        const project = await tx.project.findUnique({ where: { id: projectId } });
+        const project = await tx.project.findUnique({ where: { id: projectId }, include: { finishedGood: true } });
         if (!project) throw new Error('PROJECT_NOT_FOUND');
         this.assertMutable(project);
         const material = await (tx as any).material.findUnique({ where: { id: input.materialId } });
@@ -77,7 +78,7 @@ export class ProjectsService {
     return this.serializable(async (tx) => {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
-      const project = await tx.project.findUnique({ where: { id: projectId } });
+      const project = await tx.project.findUnique({ where: { id: projectId }, include: { finishedGood: true } });
       this.assertMutable(project);
       const delta = cents(nextQuantity) - cents(allocation.quantity);
       if (delta !== 0n) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(-delta) }, delta > 0n ? 'ALLOCATION' : 'RETURN', { projectId, allocationId });
@@ -89,7 +90,7 @@ export class ProjectsService {
     await this.serializable(async (tx) => {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
-      const project = await tx.project.findUnique({ where: { id: projectId } });
+      const project = await tx.project.findUnique({ where: { id: projectId }, include: { finishedGood: true } });
       this.assertMutable(project);
       await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId, allocationId });
       await tx.materialAllocation!.delete({ where: { id: allocationId } });
