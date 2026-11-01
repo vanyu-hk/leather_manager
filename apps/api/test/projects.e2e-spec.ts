@@ -71,4 +71,44 @@ describePostgres('Projects allocation concurrency (Docker PostgreSQL required)',
       await client.$disconnect();
     }
   });
+
+  it('serializes concurrent updates of one allocation without losing inventory or ledger state', async () => {
+    const { PrismaClient } = await import('@prisma/client'); const client = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });
+    const projects = new ProjectsService(client as never, new InventoryService(client as never)); let materialId: string | undefined; let projectId: string | undefined;
+    try {
+      materialId = (await client.material.create({ data: { name: '更新并发皮料', type: '植鞣革', color: '黑色', unit: '平方英尺', currentQuantity: '1.00' } })).id;
+      projectId = (await projects.create({ name: '更新并发项目', type: '包袋', primaryColor: '黑色' })).id as string;
+      const allocation = await projects.createAllocation(projectId, { materialId, quantity: '0.35' });
+      const results = await Promise.allSettled([projects.updateAllocation(projectId, allocation.id as string, { quantity: '0.50' }), projects.updateAllocation(projectId, allocation.id as string, { quantity: '0.60' })]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+      const persisted = await client.materialAllocation.findUniqueOrThrow({ where: { id: allocation.id as string } }); const material = await client.material.findUniqueOrThrow({ where: { id: materialId } });
+      expect([0.50, 0.60]).toContain(Number(persisted.quantity)); expect(Number(material.currentQuantity)).toBe(1 - Number(persisted.quantity));
+      const deltas = await client.inventoryMovement.aggregate({ where: { materialId, projectId, allocationId: allocation.id as string }, _sum: { quantityDelta: true } });
+      expect(Number(deltas._sum.quantityDelta)).toBe(-Number(persisted.quantity));
+    } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); if (materialId) await client.material.delete({ where: { id: materialId } }).catch(() => undefined); await client.$disconnect(); }
+  });
+
+  it('keeps inventory and ledger coherent when allocation creation races project deletion', async () => {
+    const { PrismaClient } = await import('@prisma/client'); const client = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });
+    const projects = new ProjectsService(client as never, new InventoryService(client as never)); let materialId: string | undefined; let projectId: string | undefined;
+    try {
+      materialId = (await client.material.create({ data: { name: '删除并发皮料', type: '植鞣革', color: '红色', unit: '平方英尺', currentQuantity: '1.00' } })).id;
+      projectId = (await projects.create({ name: '删除并发项目', type: '包袋', primaryColor: '红色' })).id as string;
+      await Promise.allSettled([projects.createAllocation(projectId, { materialId, quantity: '0.35' }), projects.remove(projectId)]);
+      const project = await client.project.findUnique({ where: { id: projectId }, include: { allocations: true } }); const material = await client.material.findUniqueOrThrow({ where: { id: materialId } });
+      const ledger = await client.inventoryMovement.aggregate({ where: { materialId }, _sum: { quantityDelta: true } });
+      expect(project?.allocations.length ?? 0).toBe(await client.materialAllocation.count({ where: { projectId } }));
+      expect(Number(material.currentQuantity) + Number(ledger._sum.quantityDelta)).toBe(1);
+    } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); if (materialId) await client.material.delete({ where: { id: materialId } }).catch(() => undefined); await client.$disconnect(); }
+  });
+
+  it('returns one finished good for concurrent archive requests', async () => {
+    const { PrismaClient } = await import('@prisma/client'); const client = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });
+    const projects = new ProjectsService(client as never, new InventoryService(client as never)); let projectId: string | undefined;
+    try {
+      projectId = (await projects.create({ name: '成品并发项目', type: '包袋', primaryColor: '蓝色' })).id as string; await projects.updateStatus(projectId, 'COMPLETED');
+      const [first, second] = await Promise.all([projects.createFinishedGood(projectId), projects.createFinishedGood(projectId)]);
+      expect(first.id).toBe(second.id); expect(await client.finishedGood.count({ where: { sourceProjectId: projectId } })).toBe(1);
+    } finally { if (projectId) await client.project.delete({ where: { id: projectId } }).catch(() => undefined); await client.$disconnect(); }
+  });
 });
