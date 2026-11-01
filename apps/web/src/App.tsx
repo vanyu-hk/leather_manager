@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './AppShell';
@@ -7,7 +8,7 @@ import './styles.css';
 function ComingSoon({ title }: { title: string }) { return <section className="page"><header className="page-header"><div><p className="eyebrow">皮作手帐</p><h1>{title}</h1><p>这个功能正在开发中，敬请期待。</p></div></header><div className="state-card"><strong>开发中</strong><span>我们正在认真打磨这个功能。</span></div></section>; }
 
 export default function App() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }));
   return <QueryClientProvider client={client}><BrowserRouter><Routes><Route element={<AppShell />}>
     <Route index element={<Navigate to="/materials" replace />} />
     <Route path="materials" element={<MaterialPage />} />

@@ -1,9 +1,10 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { Dialog } from './Dialog';
 
 const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
@@ -21,6 +22,7 @@ function mockViewport(mobile: boolean) {
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/materials');
   mockViewport(false);
   vi.stubGlobal('fetch', vi.fn(() => json([material])));
 });
@@ -28,6 +30,52 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('材料库存', () => {
+it('restores URL-synced filters across browser Back, Forward, and reload-style remounts', async () => {
+  const user = userEvent.setup();
+  const second = { ...material, id: 'material-2', name: '黄铜扣', type: '五金', color: '黄铜色' };
+  vi.mocked(fetch).mockImplementation(() => json([material, second]));
+  const view = render(<App />);
+  await screen.findByText('植鞣革');
+  await user.type(screen.getByRole('searchbox', { name: '搜索材料' }), '植鞣');
+  await user.selectOptions(screen.getByLabelText('材料类型'), '牛皮');
+  await user.selectOptions(screen.getByLabelText('颜色'), '原色');
+  await user.selectOptions(screen.getByLabelText('库存状态'), 'NORMAL');
+  expect(window.location.search).toContain('q=%E6%A4%8D%E9%9E%A3');
+  expect(window.location.search).toContain('type=%E7%89%9B%E7%9A%AE');
+  expect(window.location.search).toContain('color=%E5%8E%9F%E8%89%B2');
+  expect(window.location.search).toContain('stockStatus=NORMAL');
+  const wentBack = new Promise<void>((resolve) => window.addEventListener('popstate', () => resolve(), { once: true }));
+  await act(async () => { window.history.back(); await wentBack; });
+  await waitFor(() => expect(screen.getByLabelText('库存状态')).toHaveValue(''));
+  const wentForward = new Promise<void>((resolve) => window.addEventListener('popstate', () => resolve(), { once: true }));
+  await act(async () => { window.history.forward(); await wentForward; });
+  await waitFor(() => expect(screen.getByLabelText('库存状态')).toHaveValue('NORMAL'));
+  const savedUrl = window.location.href;
+  view.unmount();
+  window.history.replaceState({}, '', savedUrl);
+  render(<App />);
+  expect(await screen.findByRole('searchbox', { name: '搜索材料' })).toHaveValue('植鞣');
+  await waitFor(() => expect(screen.getByLabelText('材料类型')).toHaveValue('牛皮'));
+});
+
+it('keeps complete type and color facets while filtered rows change', async () => {
+  const user = userEvent.setup();
+  const hardware = { ...material, id: 'material-2', name: '黄铜扣', type: '五金', color: '黄铜色' };
+  window.history.replaceState({}, '', '/materials?type=%E7%89%9B%E7%9A%AE');
+  vi.mocked(fetch).mockImplementation((input) => {
+    const url = String(input);
+    if (url.includes('type=')) return json(url.includes('%E7%89%9B%E7%9A%AE') ? [material] : [hardware]);
+    return json([material, hardware]);
+  });
+  render(<App />);
+  await screen.findByText('植鞣革');
+  await user.selectOptions(screen.getByLabelText('材料类型'), '牛皮');
+  expect(await screen.findByText('植鞣革')).toBeVisible();
+  expect(screen.getByRole('option', { name: '五金' })).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('材料类型'), '五金');
+  expect(await screen.findByText('黄铜扣')).toBeVisible();
+  expect(screen.getByRole('option', { name: '原色' })).toBeInTheDocument();
+});
 it('shows a Chinese loading error and retries the request', async () => {
   const user = userEvent.setup();
   let finish!: (response: Response) => void;
@@ -174,6 +222,24 @@ it('traps focus in the dialog in both directions, closes with Escape, and restor
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(opener).toHaveFocus();
   expect(container).not.toHaveAttribute('inert');
+});
+
+it('does not reset dialog focus when a parent rerenders with a fresh close callback', async () => {
+  const onClose = vi.fn();
+  const preHidden = document.createElement('div');
+  preHidden.setAttribute('inert', ''); preHidden.inert = true; preHidden.setAttribute('aria-hidden', 'false');
+  document.body.append(preHidden);
+  const view = render(<Dialog title="重渲染测试" onClose={() => onClose()}><label>第一项<input /></label><label>第二项<input /></label></Dialog>);
+  const second = screen.getByLabelText('第二项');
+  second.focus();
+  view.rerender(<Dialog title="重渲染测试" onClose={() => onClose()}><label>第一项<input /></label><label>第二项<input /></label></Dialog>);
+  expect(second).toHaveFocus();
+  await userEvent.setup().keyboard('{Escape}');
+  expect(onClose).toHaveBeenCalledOnce();
+  view.unmount();
+  expect(preHidden).toHaveAttribute('inert');
+  expect(preHidden).toHaveAttribute('aria-hidden', 'false');
+  preHidden.remove();
 });
 });
 

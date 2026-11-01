@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, materialsApi, type CreateMaterialInput, type Material, type MaterialFilters, type StockStatus } from './api';
 import { Dialog } from './Dialog';
 
@@ -67,16 +68,29 @@ function DeleteDialog({ material, onClose, onSuccess }: { material: Material; on
 
 export function MaterialPage() {
   const client = useQueryClient();
-  const [filters, setFilters] = useState(emptyFilters);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters: MaterialFilters = {
+    q: searchParams.get('q') ?? emptyFilters.q,
+    type: searchParams.get('type') ?? emptyFilters.type,
+    color: searchParams.get('color') ?? emptyFilters.color,
+    stockStatus: (searchParams.get('stockStatus') as StockStatus | null) ?? emptyFilters.stockStatus,
+  };
   const [createOpen, setCreateOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<Material | null>(null);
   const [deleting, setDeleting] = useState<Material | null>(null);
   const [notice, setNotice] = useState('');
-  const query = useQuery({ queryKey: ['materials', filters], queryFn: () => materialsApi.list(filters) });
+  const hasFilters = Object.values(filters).some(Boolean);
+  const facetsQuery = useQuery({ queryKey: ['materials', 'facets'], queryFn: () => materialsApi.list(emptyFilters) });
+  const filteredQuery = useQuery({ queryKey: ['materials', 'filtered', filters], queryFn: () => materialsApi.list(filters), enabled: hasFilters });
+  const query = hasFilters ? filteredQuery : facetsQuery;
   const materials = query.data ?? [];
-  const types = useMemo(() => [...new Set([...materials.map((item) => item.type), filters.type].filter(Boolean))], [materials, filters.type]);
-  const colors = useMemo(() => [...new Set([...materials.map((item) => item.color), filters.color].filter(Boolean))], [materials, filters.color]);
-  const updateFilter = (key: keyof MaterialFilters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
+  const types = useMemo(() => [...new Set((facetsQuery.data ?? []).map((item) => item.type))], [facetsQuery.data]);
+  const colors = useMemo(() => [...new Set((facetsQuery.data ?? []).map((item) => item.color))], [facetsQuery.data]);
+  const updateFilter = (key: keyof MaterialFilters, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value); else next.delete(key);
+    setSearchParams(next, { replace: key === 'q' });
+  };
   const completed = async (message: string, close: () => void) => { close(); setNotice(message); await client.invalidateQueries({ queryKey: ['materials'] }); };
 
   return <section className="page">
