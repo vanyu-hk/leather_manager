@@ -8,16 +8,15 @@ describe('InventoryService', () => {
     await expect(
       service.changeBalance('material-1', {
         quantityDelta: '-3.00',
-        note: '盘点',
       }),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
   });
 
   it('normalizes a successful adjustment and persists one ADJUSTMENT movement', async () => {
     const db = new WritableBalanceDatabase('1.00');
-    await new InventoryService(db as never).changeBalance('material-1', { quantityDelta: '1', note: '盘点' });
+    await new InventoryService(db as never).changeBalance('material-1', { quantityDelta: '1' });
     expect(db.currentQuantity).toBe('2.00');
-    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ADJUSTMENT', quantityDelta: '1.00', note: '盘点' })]);
+    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ADJUSTMENT', quantityDelta: '1.00' })]);
   });
 
   it('uses conditional updateMany for a decrement and does not write history when it loses the race', async () => {

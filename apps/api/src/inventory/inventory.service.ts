@@ -7,7 +7,7 @@ export class InsufficientStockError extends Error {
 }
 
 import { cents, decimal, quantity } from './quantity.js';
-type ChangeBalanceInput = { quantityDelta: string; note?: string };
+type ChangeBalanceInput = { quantityDelta: string };
 
 type Database = {
   $transaction<T>(callback: (tx: Database) => Promise<T>): Promise<T>;
@@ -47,7 +47,6 @@ export class InventoryService {
           materialId,
           quantityDelta: quantity(input.quantityDelta, true),
           reason: 'ADJUSTMENT',
-          note: input.note ?? null,
           occurredAt: new Date(),
         },
       });

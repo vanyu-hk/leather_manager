@@ -37,19 +37,26 @@ describe('MaterialsService', () => {
       { id: 'normal', name: '棕色植鞣革', type: '植鞣革', color: '棕色', unit: '尺', currentQuantity: '3.00', lowStockThreshold: '2.00' },
       { id: 'low', name: '黑色牛皮', type: '牛皮', color: '黑色', unit: '尺', currentQuantity: '2.00', lowStockThreshold: '2.00' },
       { id: 'zero', name: '白色牛皮', type: '牛皮', color: '白色', unit: '尺', currentQuantity: '0.00', lowStockThreshold: '2.00' },
+      { id: 'no-threshold', name: '原色羊皮', type: '羊皮', color: '原色', unit: '尺', currentQuantity: '1.00', lowStockThreshold: null },
     ]);
     const service = new MaterialsService(db as never);
     await expect(service.list({ q: '植鞣' })).resolves.toMatchObject([{ id: 'normal' }]);
     await expect(service.list({ type: '牛皮' })).resolves.toHaveLength(2);
     await expect(service.list({ color: '黑色' })).resolves.toMatchObject([{ id: 'low' }]);
-    await expect(service.list({ stockStatus: 'NORMAL' })).resolves.toMatchObject([{ id: 'normal' }]);
+    await expect(service.list({ stockStatus: 'NORMAL' })).resolves.toMatchObject([{ id: 'normal' }, { id: 'no-threshold' }]);
     await expect(service.list({ stockStatus: 'LOW' })).resolves.toMatchObject([{ id: 'low' }]);
     await expect(service.list({ stockStatus: 'OUT_OF_STOCK' })).resolves.toMatchObject([{ id: 'zero' }]);
   });
 
-  it('does not partially delete a material that has movement history', async () => {
-    const db = new DeleteDatabase('1.00', 1);
+  it('does not partially delete a zero-quantity material that has movement history', async () => {
+    const db = new DeleteDatabase('0.00', 1);
     await expect(new MaterialsService(db as never).remove('material-1')).rejects.toMatchObject({ code: 'MATERIAL_HAS_HISTORY', message: expect.stringContaining('无法删除') });
+    expect(db.deleted).toBe(false);
+  });
+
+  it('does not partially delete a positive-quantity material without history', async () => {
+    const db = new DeleteDatabase('1.00', 0);
+    await expect(new MaterialsService(db as never).remove('material-1')).rejects.toMatchObject({ code: 'MATERIAL_HAS_HISTORY' });
     expect(db.deleted).toBe(false);
   });
 
