@@ -1,8 +1,11 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+
+const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
 const material = { id: 'material-1', name: '植鞣革', type: '牛皮', color: '原色', unit: '平方尺', currentQuantity: '12.50', lowStockThreshold: '3.00' };
 
@@ -25,6 +28,19 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('材料库存', () => {
+it('shows a Chinese loading error and retries the request', async () => {
+  const user = userEvent.setup();
+  let finish!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; })).mockImplementationOnce(() => json([material]));
+  render(<App />);
+  expect(screen.getByRole('status')).toHaveTextContent('正在读取材料库存');
+  finish(await json({ code: 'SERVER_ERROR', message: '库存服务暂时不可用。' }, 500));
+  expect(await screen.findByRole('alert')).toHaveTextContent('库存服务暂时不可用');
+  await user.click(screen.getByRole('button', { name: '重新加载' }));
+  expect(await screen.findByText('植鞣革')).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
 it('loads real material fields and sends all selected filters', async () => {
   const user = userEvent.setup();
   render(<App />);
@@ -95,6 +111,21 @@ it('keeps the adjustment quantity when stock is insufficient', async () => {
   expect(screen.getByLabelText('调整数量')).toHaveValue(-20);
 });
 
+it.each([['5.25', '5.25'], ['-2.50', '-2.5']])('submits a successful %s decimal adjustment and refreshes the list', async (quantity, expectedQuantity) => {
+  const user = userEvent.setup();
+  vi.mocked(fetch)
+    .mockImplementationOnce(() => json([material]))
+    .mockImplementationOnce((_url, init) => { expect(JSON.parse(String(init?.body))).toEqual({ quantityDelta: expectedQuantity }); return json({ ok: true }); })
+    .mockImplementationOnce(() => json([{ ...material, currentQuantity: quantity.startsWith('-') ? '10.00' : '17.75' }]));
+  render(<App />);
+  const card = (await screen.findByText('植鞣革')).closest('article')!;
+  await user.click(within(card).getByRole('button', { name: '调整库存' }));
+  await user.type(screen.getByLabelText('调整数量'), quantity);
+  await user.click(screen.getByRole('button', { name: '确认调整' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('库存已调整');
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+});
+
 it('shows the backend restriction when deleting a material with history', async () => {
   const user = userEvent.setup();
   vi.mocked(fetch).mockImplementationOnce(() => json([material])).mockImplementationOnce((_url, init) => {
@@ -109,6 +140,41 @@ it('shows the backend restriction when deleting a material with history', async 
   expect(await within(dialog).findByRole('alert')).toHaveTextContent('无法删除');
   expect(screen.queryByText('材料已删除')).not.toBeInTheDocument();
 });
+
+it('deletes a material only after the API succeeds and refreshes the list', async () => {
+  const user = userEvent.setup();
+  vi.mocked(fetch).mockImplementationOnce(() => json([material])).mockImplementationOnce((_url, init) => {
+    expect(init?.method).toBe('DELETE'); return json({ ok: true });
+  }).mockImplementationOnce(() => json([]));
+  render(<App />);
+  const card = (await screen.findByText('植鞣革')).closest('article')!;
+  await user.click(within(card).getByRole('button', { name: '删除' }));
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认删除' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('材料已删除');
+  expect(await screen.findByText('还没有材料')).toBeVisible();
+});
+
+it('traps focus in the dialog in both directions, closes with Escape, and restores focus', async () => {
+  const user = userEvent.setup();
+  const { container } = render(<App />);
+  const opener = await screen.findByRole('button', { name: '新增材料' });
+  await user.click(opener);
+  const dialog = screen.getByRole('dialog', { name: '新增材料' });
+  const first = within(dialog).getByLabelText('材料名称');
+  const firstTabStop = within(dialog).getByRole('button', { name: '关闭' });
+  const last = within(dialog).getByRole('button', { name: '保存材料' });
+  expect(first).toHaveFocus();
+  expect(container).toHaveAttribute('inert');
+  firstTabStop.focus();
+  await user.tab({ shift: true });
+  expect(last).toHaveFocus();
+  await user.tab();
+  expect(firstTabStop).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+  expect(container).not.toHaveAttribute('inert');
+});
 });
 
 it('uses a mobile bottom navigation at narrow viewport', () => {
@@ -118,4 +184,24 @@ it('uses a mobile bottom navigation at narrow viewport', () => {
   expect(nav).toBeVisible();
   expect(within(nav).getByRole('link', { name: '材料库存' })).toHaveAttribute('aria-current', 'page');
   expect(screen.queryByRole('navigation', { name: '桌面端主导航' })).not.toBeInTheDocument();
+});
+
+it('routes all five navigation destinations without presenting fake content', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  for (const destination of ['仪表盘', '作品库', '成品档案', '设置']) {
+    await user.click(screen.getByRole('link', { name: destination }));
+    expect(screen.getByRole('heading', { name: destination })).toBeVisible();
+    expect(screen.getByText('这个功能正在开发中，敬请期待。')).toBeVisible();
+  }
+  await user.click(screen.getByRole('link', { name: '材料库存' }));
+  expect(screen.getByRole('heading', { name: '材料库存' })).toBeVisible();
+});
+
+it('keeps narrow layouts fluid and wraps card content to prevent horizontal overflow', () => {
+  expect(styles).toContain('min-width: 280px');
+  expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.main-content \{ margin-left: 0;/);
+  expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*?\.page \{ padding: 28px 16px 40px;/);
+  expect(styles).toContain('grid-template-columns: 44px minmax(0, 1fr)');
+  expect(styles).toContain('overflow-wrap: anywhere');
 });
