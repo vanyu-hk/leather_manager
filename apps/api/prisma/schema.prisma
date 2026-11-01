@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+model Material {
+  id String @id @default(cuid())
+  name String
+  type String
+  color String
+  unit String
+  currentQuantity Decimal @db.Decimal(12, 2)
+  lowStockThreshold Decimal? @db.Decimal(12, 2)
+  movements InventoryMovement[]
+  createdAt DateTime @default(now())
+}
+model InventoryMovement {
+  id String @id @default(cuid())
+  materialId String
+  material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  quantityDelta Decimal @db.Decimal(12, 2)
+  reason MovementReason
+  occurredAt DateTime @default(now())
+}
+enum MovementReason {
+  OPENING_BALANCE
+  ADJUSTMENT
+  PURCHASE
+  ALLOCATION
+  RETURN
+}
