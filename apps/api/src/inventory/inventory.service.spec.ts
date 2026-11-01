@@ -32,6 +32,13 @@ describe('InventoryService', () => {
     expect(db.updateManyArgs).toMatchObject({ where: { id: 'material-1', currentQuantity: { gte: '1.00' } } });
     expect(db.movements).toHaveLength(0);
   });
+
+  it('records an ALLOCATION ledger movement when used inside a project transaction', async () => {
+    const db = new WritableBalanceDatabase('2.00');
+    await new InventoryService(db as never).changeBalanceInTransaction(db as never, 'material-1', { quantityDelta: '-0.35' }, 'ALLOCATION');
+    expect(db.currentQuantity).toBe('1.65');
+    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ALLOCATION', quantityDelta: '-0.35' })]);
+  });
 });
 
 class BalanceDatabase {
@@ -49,7 +56,7 @@ class BalanceDatabase {
 class WritableBalanceDatabase {
   currentQuantity: string; movements: Array<Record<string, unknown>> = [];
   constructor(quantity: string) { this.currentQuantity = quantity; }
-  material = { findUnique: async () => ({ id: 'material-1', currentQuantity: this.currentQuantity }), update: async ({ data }: { data: { currentQuantity: string | { increment: string } } }) => { this.currentQuantity = typeof data.currentQuantity === 'string' ? data.currentQuantity : '2.00'; } };
+  material = { findUnique: async () => ({ id: 'material-1', currentQuantity: this.currentQuantity }), update: async ({ data }: { data: { currentQuantity: string | { increment: string } } }) => { this.currentQuantity = typeof data.currentQuantity === 'string' ? data.currentQuantity : '2.00'; }, updateMany: async ({ data }: { data: { currentQuantity: { decrement: string } } }) => { this.currentQuantity = (Number(this.currentQuantity) - Number(data.currentQuantity.decrement)).toFixed(2); return { count: 1 }; } };
   inventoryMovement = { create: async ({ data }: { data: Record<string, unknown> }) => { this.movements.push(data); } };
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
 }

@@ -28,31 +28,33 @@ export class InventoryService {
   constructor(private readonly db: Database) {}
 
   async changeBalance(materialId: string, input: ChangeBalanceInput): Promise<void> {
-    await this.db.$transaction(async (tx) => {
-      const delta = cents(input.quantityDelta);
-      const material = await tx.material.findUnique({ where: { id: materialId } });
-      if (!material) throw new Error('MATERIAL_NOT_FOUND');
+    await this.db.$transaction((tx) => this.changeBalanceInTransaction(tx, materialId, input));
+  }
 
-      const next = cents(material.currentQuantity) + delta;
-      if (next < 0n) throw new InsufficientStockError();
+  async changeBalanceInTransaction(tx: Database, materialId: string, input: ChangeBalanceInput, reason: 'ADJUSTMENT' | 'ALLOCATION' | 'RETURN' = 'ADJUSTMENT'): Promise<void> {
+    const delta = cents(input.quantityDelta);
+    const material = await tx.material.findUnique({ where: { id: materialId } });
+    if (!material) throw new Error('MATERIAL_NOT_FOUND');
 
-      const currentQuantity = decimal(next);
-      if (delta < 0n && tx.material.updateMany) {
+    const next = cents(material.currentQuantity) + delta;
+    if (next < 0n) throw new InsufficientStockError();
+
+    const currentQuantity = decimal(next);
+    if (delta < 0n && tx.material.updateMany) {
         // Conditional UPDATE prevents concurrent decrements from overdrawing the balance.
         const result = await tx.material.updateMany({ where: { id: materialId, currentQuantity: { gte: decimal(-delta) } }, data: { currentQuantity: { decrement: decimal(-delta) } } });
         if (result.count !== 1) throw new InsufficientStockError();
-      } else if (delta > 0n) {
+    } else if (delta > 0n) {
         // Prisma's increment is performed by the database, avoiding stale-read lost updates.
         await tx.material.update?.({ where: { id: materialId }, data: { currentQuantity: { increment: decimal(delta) } } as never });
-      } else await tx.material.update?.({ where: { id: materialId }, data: { currentQuantity } });
-      await tx.inventoryMovement?.create({
-        data: {
-          materialId,
-          quantityDelta: quantity(input.quantityDelta, true),
-          reason: 'ADJUSTMENT',
-          occurredAt: new Date(),
-        },
-      });
+    } else await tx.material.update?.({ where: { id: materialId }, data: { currentQuantity } });
+    await tx.inventoryMovement?.create({
+      data: {
+        materialId,
+        quantityDelta: quantity(input.quantityDelta, true),
+        reason,
+        occurredAt: new Date(),
+      },
     });
   }
 }
