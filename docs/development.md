@@ -39,3 +39,6 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+# Database migrations
+
+Set `DATABASE_URL` to the PostgreSQL Compose database, then run `pnpm --filter @leather-manager/api prisma:generate` after schema changes and `pnpm --filter @leather-manager/api prisma:migrate:deploy` when deploying an existing database. The checked-in migration is applied by the deploy command; do not use `db push` in deployment.

@@ -440,3 +440,6 @@ git commit -m "feat: add media and deployment support"
 - **Spec coverage:** Task 2 covers materials, filters, adjustments, histories and deletion; Task 3 covers projects, allocation, atomic stock updates, completion and traceability; Tasks 4–5 cover responsive navigation, dashboard, forms, feedback states and end-user workflows; Task 6 covers image safety, backup/recovery and deployment. Procurement, sales, roles and mini-program delivery remain absent by design.
 - **Placeholder scan:** The plan contains no deferred implementation markers; each task names exact files, commands and test cases.
 - **Type consistency:** `Material`, `InventoryMovement`, `Project`, `MaterialAllocation`, `FinishedGood`, `ProjectStatus`, `currentQuantity`, `quantityDelta` and `INSUFFICIENT_STOCK` use the same names across database, API and UI tasks.
+# Deletion clarification
+
+Implement deletion so a zero material with only a zero opening balance is removable atomically; all nonzero or subsequent movement history blocks removal.

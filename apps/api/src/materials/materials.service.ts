@@ -65,9 +65,10 @@ export class MaterialsService {
 
   async remove(id: string): Promise<void> {
     await this.db.$transaction(async (tx: any) => {
-      const material = await tx.material.findUnique({ where: { id }, include: { _count: { select: { movements: true } } } });
+      const material = await tx.material.findUnique({ where: { id }, include: { movements: { select: { reason: true, quantityDelta: true } } } });
       if (!material) throw new Error('MATERIAL_NOT_FOUND');
-      if (String(material.currentQuantity) !== '0' && String(material.currentQuantity) !== '0.00' || material._count.movements > 0) {
+      const zeroOpeningOnly = material.movements.length === 1 && material.movements[0].reason === 'OPENING_BALANCE' && String(material.movements[0].quantityDelta) === '0.00';
+      if ((String(material.currentQuantity) !== '0' && String(material.currentQuantity) !== '0.00') || (material.movements.length > 0 && !zeroOpeningOnly)) {
         const error = new Error('该材料仍有库存或出入库历史，无法删除。');
         (error as Error & { code?: string }).code = 'MATERIAL_HAS_HISTORY';
         throw error;

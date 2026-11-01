@@ -32,6 +32,10 @@ describe('MaterialsService', () => {
     expect(db.movementsForMaterial(material.id)[0]).toMatchObject({ reason: 'OPENING_BALANCE', quantityDelta: '0.00' });
   });
 
+  it('rejects a quantity beyond Decimal(12,2)', async () => {
+    await expect(new MaterialsService(new InMemoryDatabase() as never).create({ name: '超限', type: '皮', color: '棕', unit: '尺', initialQuantity: '10000000000.00' })).rejects.toMatchObject({ code: 'INVALID_QUANTITY' });
+  });
+
   it('filters materials by q, type, color, and stock status', async () => {
     const db = new QueryDatabase([
       { id: 'normal', name: '棕色植鞣革', type: '植鞣革', color: '棕色', unit: '尺', currentQuantity: '3.00', lowStockThreshold: '2.00' },
@@ -49,7 +53,7 @@ describe('MaterialsService', () => {
   });
 
   it('does not partially delete a zero-quantity material that has movement history', async () => {
-    const db = new DeleteDatabase('0.00', 1);
+    const db = new DeleteDatabase('0.00', 1, [{ reason: 'ADJUSTMENT', quantityDelta: '0.00' }]);
     await expect(new MaterialsService(db as never).remove('material-1')).rejects.toMatchObject({ code: 'MATERIAL_HAS_HISTORY', message: expect.stringContaining('无法删除') });
     expect(db.deleted).toBe(false);
   });
@@ -62,6 +66,12 @@ describe('MaterialsService', () => {
 
   it('deletes a zero-quantity material with no history', async () => {
     const db = new DeleteDatabase('0.00', 0);
+    await new MaterialsService(db as never).remove('material-1');
+    expect(db.deleted).toBe(true);
+  });
+
+  it('deletes a zero-quantity material with only its zero opening balance', async () => {
+    const db = new DeleteDatabase('0.00', 1, [{ reason: 'OPENING_BALANCE', quantityDelta: '0.00' }]);
     await new MaterialsService(db as never).remove('material-1');
     expect(db.deleted).toBe(true);
   });
@@ -103,9 +113,9 @@ class QueryDatabase {
 
 class DeleteDatabase {
   deleted = false;
-  constructor(private readonly quantity: string, private readonly history: number) {}
+  constructor(private readonly quantity: string, private readonly history: number, private readonly movements: Array<Record<string, unknown>> = []) {}
   material = {
-    findUnique: async () => ({ id: 'material-1', currentQuantity: this.quantity, _count: { movements: this.history } }),
+    findUnique: async () => ({ id: 'material-1', currentQuantity: this.quantity, _count: { movements: this.history }, movements: this.movements }),
     delete: async () => { this.deleted = true; },
   };
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }

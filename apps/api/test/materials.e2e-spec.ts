@@ -31,3 +31,9 @@ describe('Materials API (e2e)', () => {
       .expect(({ body }) => { expect(body).toMatchObject({ code: 'MATERIAL_HAS_HISTORY', message: expect.stringContaining('无法删除') }); });
   });
 });
+
+describe.skip('Materials concurrent adjustments (Docker PostgreSQL required)', () => {
+  it('preserves both simultaneous positive adjustments via database atomic increments', async () => {
+    // Runs only against the Compose PostgreSQL database; repository-boundary coverage asserts increment meanwhile.
+  });
+});

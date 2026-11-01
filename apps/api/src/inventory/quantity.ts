@@ -1,6 +1,6 @@
 export function quantity(value: unknown, allowNegative = false): string {
   const input = String(value).trim();
-  if (!/^-?\d+(\.\d{1,2})?$/.test(input) || (!allowNegative && input.startsWith('-'))) throw Object.assign(new Error('数量格式无效。'), { code: 'INVALID_QUANTITY' });
+  if (!/^-?\d+(\.\d{1,2})?$/.test(input) || (!allowNegative && input.startsWith('-')) || BigInt(input.startsWith('-') ? input.slice(1).split('.')[0] : input.split('.')[0]) > 9999999999n) throw Object.assign(new Error('数量格式无效。'), { code: 'INVALID_QUANTITY' });
   const negative = input.startsWith('-'); const [whole, fraction = ''] = (negative ? input.slice(1) : input).split('.');
   return `${negative ? '-' : ''}${whole}.${fraction.padEnd(2, '0')}`;
 }

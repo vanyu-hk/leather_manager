@@ -41,6 +41,9 @@ export class InventoryService {
         // Conditional UPDATE prevents concurrent decrements from overdrawing the balance.
         const result = await tx.material.updateMany({ where: { id: materialId, currentQuantity: { gte: decimal(-delta) } }, data: { currentQuantity: { decrement: decimal(-delta) } } });
         if (result.count !== 1) throw new InsufficientStockError();
+      } else if (delta > 0n) {
+        // Prisma's increment is performed by the database, avoiding stale-read lost updates.
+        await tx.material.update?.({ where: { id: materialId }, data: { currentQuantity: { increment: decimal(delta) } } as never });
       } else await tx.material.update?.({ where: { id: materialId }, data: { currentQuantity } });
       await tx.inventoryMovement?.create({
         data: {

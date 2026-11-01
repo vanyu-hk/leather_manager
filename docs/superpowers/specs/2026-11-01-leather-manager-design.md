@@ -127,3 +127,6 @@ flowchart LR
 - 材料面积单位是否需要在首版统一换算；建议首版按条目原始单位计量，避免不可靠的单位换算。
 - 成品是否允许不来源于作品而直接新建；建议允许，以便补录历史作品，但应明确标为“手动建档”。
 - 服务器、域名、对象存储供应商和备份保留周期尚待部署阶段确定。
+# Inventory deletion clarification
+
+A material at zero may be deleted when its sole movement is its zero-valued opening balance; that bookkeeping row is deleted atomically with the material. Any nonzero opening balance or any later adjustment/allocation movement remains traceable and blocks deletion.

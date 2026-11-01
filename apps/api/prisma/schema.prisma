@@ -19,7 +19,7 @@ model Material {
 model InventoryMovement {
   id String @id @default(cuid())
   materialId String
-  material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
   quantityDelta Decimal @db.Decimal(12, 2)
   reason MovementReason
   occurredAt DateTime @default(now())
