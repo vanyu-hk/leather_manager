@@ -39,6 +39,14 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+To run the PostgreSQL-backed concurrency coverage after starting Compose and applying migrations, set `TEST_DATABASE_URL` and run the API e2e suite:
+
+```bash
+TEST_DATABASE_URL="$DATABASE_URL" pnpm --filter @leather-manager/api test:e2e
+```
+
+Without `TEST_DATABASE_URL`, Docker-dependent concurrency cases are intentionally skipped.
 # Database migrations
 
 Set `DATABASE_URL` to the PostgreSQL Compose database, then run `pnpm --filter @leather-manager/api prisma:generate` after schema changes and `pnpm --filter @leather-manager/api prisma:migrate:deploy` when deploying an existing database. The checked-in migration is applied by the deploy command; do not use `db push` in deployment.

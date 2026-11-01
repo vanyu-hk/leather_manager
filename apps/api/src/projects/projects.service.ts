@@ -20,7 +20,15 @@ export class ProjectsService {
     return this.db.$transaction((tx) => tx.project.create({ data: { ...input, status: 'WISHLIST' } }));
   }
 
-  async list(): Promise<Array<Record<string, unknown>>> { return this.db.project.findMany({ include: { allocations: true, finishedGood: true }, orderBy: { createdAt: 'desc' } }); }
+  async list(): Promise<Array<Record<string, unknown>>> {
+    return this.db.project.findMany({
+      include: {
+        allocations: { include: { material: true } },
+        finishedGood: { include: { sourceProject: { include: { allocations: { include: { material: true } } } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 
   async board(): Promise<Record<ProjectStatus, Array<Record<string, unknown>>>> {
     const projects = await this.list();
@@ -46,13 +54,20 @@ export class ProjectsService {
 
   async createAllocation(projectId: string, input: CreateAllocationInput): Promise<Record<string, unknown>> {
     const allocationQuantity = quantity(input.quantity);
-    return this.db.$transaction(async (tx) => {
-      const project = await tx.project.findUnique({ where: { id: projectId } });
-      if (!project) throw new Error('PROJECT_NOT_FOUND');
-      const allocation = await tx.materialAllocation!.create({ data: { projectId, materialId: input.materialId, quantity: allocationQuantity } });
-      await this.inventory.changeBalanceInTransaction(tx as never, input.materialId, { quantityDelta: decimal(-cents(allocationQuantity)) }, 'ALLOCATION', { projectId, allocationId: allocation.id });
-      return allocation;
-    });
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const project = await tx.project.findUnique({ where: { id: projectId } });
+        if (!project) throw new Error('PROJECT_NOT_FOUND');
+        const material = await (tx as any).material.findUnique({ where: { id: input.materialId } });
+        if (!material) throw new Error('MATERIAL_NOT_FOUND');
+        const allocation = await tx.materialAllocation!.create({ data: { projectId, materialId: input.materialId, quantity: allocationQuantity } });
+        await this.inventory.changeBalanceInTransaction(tx as never, input.materialId, { quantityDelta: decimal(-cents(allocationQuantity)) }, 'ALLOCATION', { projectId, allocationId: allocation.id });
+        return allocation;
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2003') throw new Error('MATERIAL_NOT_FOUND');
+      throw error;
+    }
   }
 
   async updateAllocation(projectId: string, allocationId: string, input: { quantity: string }): Promise<Record<string, unknown>> {

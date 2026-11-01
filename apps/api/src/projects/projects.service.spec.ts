@@ -56,6 +56,27 @@ describe('ProjectsService', () => {
     await expect(new ProjectsService(db as never, inventory as never).createAllocation('project-1', { materialId: 'material-1', quantity: '2.01' })).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
     expect(db.allocations).toEqual([]);
   });
+
+  it('maps a material foreign-key race to MATERIAL_NOT_FOUND without retaining the allocation', async () => {
+    const db = new AllocationDatabase();
+    db.material = { findUnique: async () => ({ id: 'material-1' }) };
+    db.materialAllocation.create = async () => { throw Object.assign(new Error('foreign key'), { code: 'P2003' }); };
+    await expect(new ProjectsService(db as never, new RecordingInventory() as never).createAllocation('project-1', { materialId: 'material-1', quantity: '0.35' })).rejects.toThrow('MATERIAL_NOT_FOUND');
+    expect(db.allocations).toEqual([]);
+  });
+
+  it('validates material existence before writing an allocation', async () => {
+    const db = new AllocationDatabase();
+    db.material = { findUnique: async () => null } as never;
+    await expect(new ProjectsService(db as never, new RecordingInventory() as never).createAllocation('project-1', { materialId: 'missing-material', quantity: '0.35' })).rejects.toThrow('MATERIAL_NOT_FOUND');
+    expect(db.allocations).toEqual([]);
+  });
+
+  it('loads list finished goods with their source project and allocation material traceability', async () => {
+    const db = new TraceListDatabase();
+    await new ProjectsService(db as never, new RecordingInventory() as never).list();
+    expect(db.findManyArgs).toMatchObject({ include: { allocations: { include: { material: true } }, finishedGood: { include: { sourceProject: { include: { allocations: { include: { material: true } } } } } } } });
+  });
 });
 
 class ProjectsDatabase {
@@ -88,10 +109,17 @@ class AllocationDatabase {
     update: async ({ where, data }: any) => Object.assign(this.allocations.find((item) => item.id === where.id)!, data),
     delete: async ({ where }: any) => { this.allocations = this.allocations.filter((item) => item.id !== where.id); },
   };
+  material = { findUnique: async () => ({ id: 'material-1' }) };
   finishedGood = { create: async ({ data }: any) => (this.finishedGoodRecord = { id: 'good-1', ...data }) };
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
     const snapshot = { allocations: this.allocations.map((allocation) => ({ ...allocation })), project: { ...this.projectRecord }, deleted: this.deleted, finishedGood: this.finishedGoodRecord };
     try { return await callback(this); }
     catch (error) { this.allocations = snapshot.allocations; this.projectRecord = snapshot.project; this.deleted = snapshot.deleted; this.finishedGoodRecord = snapshot.finishedGood; throw error; }
   }
+}
+
+class TraceListDatabase {
+  findManyArgs: Record<string, unknown> | undefined;
+  project = { findMany: async (args: Record<string, unknown>) => { this.findManyArgs = args; return []; } };
+  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
 }
