@@ -8,9 +8,16 @@ describe('InventoryService', () => {
     await expect(
       service.changeBalance('material-1', {
         quantityDelta: '-3.00',
-        reason: '盘点',
+        note: '盘点',
       }),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+  });
+
+  it('normalizes a successful adjustment and persists one ADJUSTMENT movement', async () => {
+    const db = new WritableBalanceDatabase('1.00');
+    await new InventoryService(db as never).changeBalance('material-1', { quantityDelta: '1', note: '盘点' });
+    expect(db.currentQuantity).toBe('2.00');
+    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ADJUSTMENT', quantityDelta: '1.00', note: '盘点' })]);
   });
 });
 
@@ -24,4 +31,12 @@ class BalanceDatabase {
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
     return callback(this);
   }
+}
+
+class WritableBalanceDatabase {
+  currentQuantity: string; movements: Array<Record<string, unknown>> = [];
+  constructor(quantity: string) { this.currentQuantity = quantity; }
+  material = { findUnique: async () => ({ id: 'material-1', currentQuantity: this.currentQuantity }), update: async ({ data }: { data: { currentQuantity: string } }) => { this.currentQuantity = data.currentQuantity; } };
+  inventoryMovement = { create: async ({ data }: { data: Record<string, unknown> }) => { this.movements.push(data); } };
+  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
 }

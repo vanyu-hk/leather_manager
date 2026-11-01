@@ -22,6 +22,7 @@ model InventoryMovement {
   material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
   quantityDelta Decimal @db.Decimal(12, 2)
   reason MovementReason
+  note String?
   occurredAt DateTime @default(now())
 }
 enum MovementReason {

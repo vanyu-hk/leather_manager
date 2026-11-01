@@ -22,6 +22,15 @@ describe('MaterialsService', () => {
       }),
     );
   });
+
+  it('records one zero opening balance when quantity is omitted', async () => {
+    const db = new InMemoryDatabase();
+    const service = new MaterialsService(db as never);
+    const material = await service.create({ name: '黑色牛皮', type: '牛皮', color: '黑色', unit: '平方尺' });
+    expect(material.currentQuantity).toBe('0.00');
+    expect(db.movementsForMaterial(material.id)).toHaveLength(1);
+    expect(db.movementsForMaterial(material.id)[0]).toMatchObject({ reason: 'OPENING_BALANCE', quantityDelta: '0.00' });
+  });
 });
 
 class InMemoryDatabase {

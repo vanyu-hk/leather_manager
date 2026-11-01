@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { quantity } from '../inventory/quantity.js';
 export type CreateMaterialInput = {
   name: string;
   type: string;
@@ -22,7 +23,8 @@ export class MaterialsService {
   constructor(private readonly db: Database) {}
 
   async create(input: CreateMaterialInput): Promise<MaterialResult> {
-    const initialQuantity = input.initialQuantity ?? '0.00';
+    const initialQuantity = quantity(input.initialQuantity ?? '0.00');
+    const lowStockThreshold = input.lowStockThreshold == null ? null : quantity(input.lowStockThreshold);
 
     return this.db.$transaction(async (tx) => {
       const material = await tx.material.create({
@@ -32,20 +34,18 @@ export class MaterialsService {
           color: input.color,
           unit: input.unit,
           currentQuantity: initialQuantity,
-          lowStockThreshold: input.lowStockThreshold ?? null,
+          lowStockThreshold,
         },
       });
 
-      if (initialQuantity !== '0.00') {
-        await tx.inventoryMovement.create({
+      await tx.inventoryMovement.create({
           data: {
             materialId: material.id,
             quantityDelta: initialQuantity,
             reason: 'OPENING_BALANCE',
             occurredAt: new Date(),
           },
-        });
-      }
+      });
 
       return { ...material, currentQuantity: initialQuantity } as MaterialResult;
     });
