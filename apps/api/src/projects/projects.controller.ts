@@ -23,6 +23,7 @@ export class ProjectsController {
       if (error instanceof InsufficientStockError || code === 'INSUFFICIENT_STOCK') throw new HttpException({ code: 'INSUFFICIENT_STOCK', message: '库存不足，无法完成扣减。' }, HttpStatus.CONFLICT);
       if (code === 'PROJECT_NOT_FOUND') throw new HttpException({ code, message: '未找到该项目。' }, HttpStatus.NOT_FOUND);
       if (code === 'PROJECT_NOT_COMPLETED') throw new HttpException({ code, message: '项目尚未完成，无法生成成品。' }, HttpStatus.CONFLICT);
+      if (code === 'MATERIAL_NOT_FOUND') throw new HttpException({ code, message: '未找到该材料。' }, HttpStatus.NOT_FOUND);
       if (code === 'INVALID_QUANTITY') throw new HttpException({ code, message: (error as Error).message }, HttpStatus.BAD_REQUEST);
       throw error;
     }

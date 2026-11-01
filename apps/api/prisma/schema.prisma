@@ -60,6 +60,8 @@ model InventoryMovement {
   material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
   quantityDelta Decimal @db.Decimal(12, 2)
   reason MovementReason
+  projectId String?
+  allocationId String?
   occurredAt DateTime @default(now())
 }
 enum MovementReason {

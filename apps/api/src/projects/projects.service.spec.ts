@@ -23,7 +23,7 @@ describe('ProjectsService', () => {
     await service.removeAllocation('project-1', allocation.id as string);
 
     expect(inventory.changes).toEqual([
-      expect.objectContaining({ materialId: 'material-1', quantityDelta: '-0.35', reason: 'ALLOCATION' }),
+      expect.objectContaining({ materialId: 'material-1', quantityDelta: '-0.35', reason: 'ALLOCATION', projectId: 'project-1', allocationId: allocation.id }),
       expect.objectContaining({ materialId: 'material-1', quantityDelta: '-0.15', reason: 'ALLOCATION' }),
       expect.objectContaining({ materialId: 'material-1', quantityDelta: '0.50', reason: 'RETURN' }),
     ]);
@@ -40,11 +40,14 @@ describe('ProjectsService', () => {
 
   it('sets completion timestamp and only creates finished goods from completed projects with source traceability', async () => {
     const db = new AllocationDatabase(); const service = new ProjectsService(db as never, new RecordingInventory() as never);
+    db.allocations.push({ id: 'allocation-1', projectId: 'project-1', materialId: 'material-1', quantity: '0.35' });
     await expect(service.createFinishedGood('project-1')).rejects.toThrow('PROJECT_NOT_COMPLETED');
     const project = await service.updateStatus('project-1', 'COMPLETED');
     const good = await service.createFinishedGood('project-1');
+    const existing = await service.createFinishedGood('project-1');
     expect(project.completedAt).toBeInstanceOf(Date);
-    expect(good).toMatchObject({ sourceProjectId: 'project-1', name: '托特包', type: '包袋', primaryColor: '棕色', allocations: [] });
+    expect(good).toMatchObject({ sourceProjectId: 'project-1', name: '托特包', type: '包袋', primaryColor: '棕色', sourceProject: { id: 'project-1' }, allocations: [expect.objectContaining({ material: { id: 'material-1' } })] });
+    expect(existing).toMatchObject({ sourceProject: { id: 'project-1' }, allocations: [expect.objectContaining({ materialId: 'material-1', quantity: '0.35' })] });
   });
 
   it('does not create an allocation when inventory rejects an over-allocation', async () => {
@@ -68,7 +71,7 @@ class ProjectsDatabase {
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
 }
 
-class RecordingInventory { changes: Array<Record<string, unknown>> = []; reject = false; async changeBalanceInTransaction(_tx: unknown, materialId: string, input: { quantityDelta: string }, reason: string) { if (this.reject) throw Object.assign(new Error('库存不足'), { code: 'INSUFFICIENT_STOCK' }); this.changes.push({ materialId, ...input, reason }); } }
+class RecordingInventory { changes: Array<Record<string, unknown>> = []; reject = false; async changeBalanceInTransaction(_tx: unknown, materialId: string, input: { quantityDelta: string }, reason: string, reference: { projectId?: string; allocationId?: string } = {}) { if (this.reject) throw Object.assign(new Error('库存不足'), { code: 'INSUFFICIENT_STOCK' }); this.changes.push({ materialId, ...input, reason, ...reference }); } }
 
 class AllocationDatabase {
   allocations: Array<Record<string, any>> = []; deleted: string | undefined;
@@ -86,5 +89,9 @@ class AllocationDatabase {
     delete: async ({ where }: any) => { this.allocations = this.allocations.filter((item) => item.id !== where.id); },
   };
   finishedGood = { create: async ({ data }: any) => (this.finishedGoodRecord = { id: 'good-1', ...data }) };
-  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
+  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
+    const snapshot = { allocations: this.allocations.map((allocation) => ({ ...allocation })), project: { ...this.projectRecord }, deleted: this.deleted, finishedGood: this.finishedGoodRecord };
+    try { return await callback(this); }
+    catch (error) { this.allocations = snapshot.allocations; this.projectRecord = snapshot.project; this.deleted = snapshot.deleted; this.finishedGoodRecord = snapshot.finishedGood; throw error; }
+  }
 }

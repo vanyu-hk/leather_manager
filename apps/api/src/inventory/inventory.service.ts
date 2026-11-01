@@ -8,6 +8,7 @@ export class InsufficientStockError extends Error {
 
 import { cents, decimal, quantity } from './quantity.js';
 type ChangeBalanceInput = { quantityDelta: string };
+export type InventoryReference = { projectId?: string; allocationId?: string };
 
 type Database = {
   $transaction<T>(callback: (tx: Database) => Promise<T>): Promise<T>;
@@ -31,7 +32,7 @@ export class InventoryService {
     await this.db.$transaction((tx) => this.changeBalanceInTransaction(tx, materialId, input));
   }
 
-  async changeBalanceInTransaction(tx: Database, materialId: string, input: ChangeBalanceInput, reason: 'ADJUSTMENT' | 'ALLOCATION' | 'RETURN' = 'ADJUSTMENT'): Promise<void> {
+  async changeBalanceInTransaction(tx: Database, materialId: string, input: ChangeBalanceInput, reason: 'ADJUSTMENT' | 'ALLOCATION' | 'RETURN' = 'ADJUSTMENT', reference: InventoryReference = {}): Promise<void> {
     const delta = cents(input.quantityDelta);
     const material = await tx.material.findUnique({ where: { id: materialId } });
     if (!material) throw new Error('MATERIAL_NOT_FOUND');
@@ -52,7 +53,9 @@ export class InventoryService {
       data: {
         materialId,
         quantityDelta: quantity(input.quantityDelta, true),
-        reason,
+          reason,
+          projectId: reference.projectId ?? null,
+          allocationId: reference.allocationId ?? null,
         occurredAt: new Date(),
       },
     });

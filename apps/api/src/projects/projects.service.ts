@@ -39,7 +39,7 @@ export class ProjectsService {
     await this.db.$transaction(async (tx) => {
       const project = await tx.project.findUnique({ where: { id }, include: { allocations: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
-      for (const allocation of project.allocations) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN');
+      for (const allocation of project.allocations) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId: id, allocationId: allocation.id });
       await tx.project.delete({ where: { id } });
     });
   }
@@ -49,8 +49,9 @@ export class ProjectsService {
     return this.db.$transaction(async (tx) => {
       const project = await tx.project.findUnique({ where: { id: projectId } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
-      await this.inventory.changeBalanceInTransaction(tx as never, input.materialId, { quantityDelta: decimal(-cents(allocationQuantity)) }, 'ALLOCATION');
-      return tx.materialAllocation!.create({ data: { projectId, materialId: input.materialId, quantity: allocationQuantity } });
+      const allocation = await tx.materialAllocation!.create({ data: { projectId, materialId: input.materialId, quantity: allocationQuantity } });
+      await this.inventory.changeBalanceInTransaction(tx as never, input.materialId, { quantityDelta: decimal(-cents(allocationQuantity)) }, 'ALLOCATION', { projectId, allocationId: allocation.id });
+      return allocation;
     });
   }
 
@@ -60,7 +61,7 @@ export class ProjectsService {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
       const delta = cents(nextQuantity) - cents(allocation.quantity);
-      if (delta !== 0n) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(-delta) }, delta > 0n ? 'ALLOCATION' : 'RETURN');
+      if (delta !== 0n) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(-delta) }, delta > 0n ? 'ALLOCATION' : 'RETURN', { projectId, allocationId });
       return tx.materialAllocation!.update({ where: { id: allocationId }, data: { quantity: nextQuantity } });
     });
   }
@@ -69,7 +70,7 @@ export class ProjectsService {
     await this.db.$transaction(async (tx) => {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
-      await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN');
+      await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId, allocationId });
       await tx.materialAllocation!.delete({ where: { id: allocationId } });
     });
   }
@@ -79,9 +80,15 @@ export class ProjectsService {
       const project = await tx.project.findUnique({ where: { id }, include: { allocations: { include: { material: true } }, finishedGood: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
       if (project.status !== 'COMPLETED') throw new Error('PROJECT_NOT_COMPLETED');
-      if (project.finishedGood) return project.finishedGood;
+      if (project.finishedGood) return { ...project.finishedGood, sourceProject: this.sourceProject(project), allocations: project.allocations };
       const finishedGood = await tx.finishedGood!.create({ data: { sourceProjectId: project.id, name: project.name, type: project.type, primaryColor: project.primaryColor, completedAt: project.completedAt ?? new Date() } });
-      return { ...finishedGood, allocations: project.allocations };
+      return { ...finishedGood, sourceProject: this.sourceProject(project), allocations: project.allocations };
     });
+  }
+
+  private sourceProject(project: Record<string, any>): Record<string, unknown> {
+    const sourceProject = { ...project };
+    delete sourceProject.finishedGood;
+    return sourceProject;
   }
 }

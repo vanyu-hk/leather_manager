@@ -35,9 +35,9 @@ describe('InventoryService', () => {
 
   it('records an ALLOCATION ledger movement when used inside a project transaction', async () => {
     const db = new WritableBalanceDatabase('2.00');
-    await new InventoryService(db as never).changeBalanceInTransaction(db as never, 'material-1', { quantityDelta: '-0.35' }, 'ALLOCATION');
+    await new InventoryService(db as never).changeBalanceInTransaction(db as never, 'material-1', { quantityDelta: '-0.35' }, 'ALLOCATION', { projectId: 'project-1', allocationId: 'allocation-1' });
     expect(db.currentQuantity).toBe('1.65');
-    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ALLOCATION', quantityDelta: '-0.35' })]);
+    expect(db.movements).toEqual([expect.objectContaining({ reason: 'ALLOCATION', quantityDelta: '-0.35', projectId: 'project-1', allocationId: 'allocation-1' })]);
   });
 });
 
