@@ -1,0 +1,17 @@
+{
+  "name": "leather-manager",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "lint": "pnpm --recursive run lint",
+    "test": "pnpm --recursive run test",
+    "build": "pnpm --recursive run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "eslint": "^9.34.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0"
+  }
+}

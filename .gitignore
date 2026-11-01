@@ -1,18 +1,5 @@
-# Local brainstorming screens and events
-.superpowers/
-.worktrees/
-
-# Environment-specific configuration
-.env
-.env.*
-!.env.example
-
-# Dependencies and build outputs
 node_modules/
 dist/
 coverage/
-
-# Editor and OS files
-.DS_Store
-.idea/
-.vscode/
+*.tsbuildinfo
+.env
