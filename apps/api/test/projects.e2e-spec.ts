@@ -37,6 +37,12 @@ describe('Projects API (e2e)', () => {
     await request(app.getHttpServer()).post('/api/v1/projects/incomplete/finished-good').expect(409).expect(({ body }) => expect(body).toMatchObject({ code: 'PROJECT_NOT_COMPLETED', message: expect.any(String) }));
     await request(app.getHttpServer()).delete('/api/v1/projects/missing').expect(404).expect(({ body }) => expect(body).toMatchObject({ code: 'PROJECT_NOT_FOUND', message: expect.any(String) }));
   });
+
+  it('rejects malformed project and allocation inputs with stable 400 contracts', async () => {
+    await request(app.getHttpServer()).post('/api/v1/projects').send({ name: ' ', type: '', primaryColor: ' ' }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: 'INVALID_PROJECT_INPUT', message: expect.any(String) }));
+    await request(app.getHttpServer()).patch('/api/v1/projects/project-1/status').send({ status: 'BAD' }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: 'INVALID_PROJECT_STATUS' }));
+    await request(app.getHttpServer()).post('/api/v1/projects/project-1/allocations').send({ materialId: 'leather-1', quantity: '0' }).expect(400).expect(({ body }) => expect(body).toMatchObject({ code: 'INVALID_ALLOCATION_QUANTITY' }));
+  });
 });
 
 const describePostgres = process.env.TEST_DATABASE_URL ? describe : describe.skip;

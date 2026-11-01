@@ -44,9 +44,10 @@ export class ProjectsService {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.$transaction(async (tx) => {
+    await this.serializable(async (tx) => {
       const project = await tx.project.findUnique({ where: { id }, include: { allocations: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
+      this.assertMutable(project);
       for (const allocation of project.allocations) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId: id, allocationId: allocation.id });
       await tx.project.delete({ where: { id } });
     });
@@ -55,9 +56,10 @@ export class ProjectsService {
   async createAllocation(projectId: string, input: CreateAllocationInput): Promise<Record<string, unknown>> {
     const allocationQuantity = quantity(input.quantity);
     try {
-      return await this.db.$transaction(async (tx) => {
+      return await this.serializable(async (tx) => {
         const project = await tx.project.findUnique({ where: { id: projectId } });
         if (!project) throw new Error('PROJECT_NOT_FOUND');
+        this.assertMutable(project);
         const material = await (tx as any).material.findUnique({ where: { id: input.materialId } });
         if (!material) throw new Error('MATERIAL_NOT_FOUND');
         const allocation = await tx.materialAllocation!.create({ data: { projectId, materialId: input.materialId, quantity: allocationQuantity } });
@@ -72,9 +74,11 @@ export class ProjectsService {
 
   async updateAllocation(projectId: string, allocationId: string, input: { quantity: string }): Promise<Record<string, unknown>> {
     const nextQuantity = quantity(input.quantity);
-    return this.db.$transaction(async (tx) => {
+    return this.serializable(async (tx) => {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
+      const project = await tx.project.findUnique({ where: { id: projectId } });
+      this.assertMutable(project);
       const delta = cents(nextQuantity) - cents(allocation.quantity);
       if (delta !== 0n) await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(-delta) }, delta > 0n ? 'ALLOCATION' : 'RETURN', { projectId, allocationId });
       return tx.materialAllocation!.update({ where: { id: allocationId }, data: { quantity: nextQuantity } });
@@ -82,21 +86,22 @@ export class ProjectsService {
   }
 
   async removeAllocation(projectId: string, allocationId: string): Promise<void> {
-    await this.db.$transaction(async (tx) => {
+    await this.serializable(async (tx) => {
       const allocation = await tx.materialAllocation!.findUnique({ where: { id: allocationId } });
       if (!allocation || allocation.projectId !== projectId) throw new Error('PROJECT_NOT_FOUND');
+      const project = await tx.project.findUnique({ where: { id: projectId } });
+      this.assertMutable(project);
       await this.inventory.changeBalanceInTransaction(tx as never, allocation.materialId, { quantityDelta: decimal(cents(allocation.quantity)) }, 'RETURN', { projectId, allocationId });
       await tx.materialAllocation!.delete({ where: { id: allocationId } });
     });
   }
 
   async createFinishedGood(id: string): Promise<Record<string, unknown>> {
-    return this.db.$transaction(async (tx) => {
+    return this.serializable(async (tx) => {
       const project = await tx.project.findUnique({ where: { id }, include: { allocations: { include: { material: true } }, finishedGood: true } });
       if (!project) throw new Error('PROJECT_NOT_FOUND');
       if (project.status !== 'COMPLETED') throw new Error('PROJECT_NOT_COMPLETED');
-      if (project.finishedGood) return { ...project.finishedGood, sourceProject: this.sourceProject(project), allocations: project.allocations };
-      const finishedGood = await tx.finishedGood!.create({ data: { sourceProjectId: project.id, name: project.name, type: project.type, primaryColor: project.primaryColor, completedAt: project.completedAt ?? new Date() } });
+      const finishedGood = project.finishedGood ?? await (tx.finishedGood as any).upsert({ where: { sourceProjectId: project.id }, create: { sourceProjectId: project.id, name: project.name, type: project.type, primaryColor: project.primaryColor, completedAt: project.completedAt ?? new Date() }, update: {} });
       return { ...finishedGood, sourceProject: this.sourceProject(project), allocations: project.allocations };
     });
   }
@@ -105,5 +110,13 @@ export class ProjectsService {
     const sourceProject = { ...project };
     delete sourceProject.finishedGood;
     return sourceProject;
+  }
+  private assertMutable(project: Record<string, any> | null): void { if (!project) throw new Error('PROJECT_NOT_FOUND'); if (project.status === 'COMPLETED' || project.finishedGood) throw new Error('PROJECT_ARCHIVED'); }
+  private async serializable<T>(operation: (tx: Database) => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try { return await (this.db as any).$transaction(operation, { isolationLevel: 'Serializable' }); }
+      catch (error) { if ((error as { code?: string }).code !== 'P2034' || attempt === 2) throw error; }
+    }
+    throw new Error('P2034');
   }
 }

@@ -47,6 +47,8 @@ TEST_DATABASE_URL="$DATABASE_URL" pnpm --filter @leather-manager/api test:e2e
 ```
 
 Without `TEST_DATABASE_URL`, Docker-dependent concurrency cases are intentionally skipped.
+
+Completed projects and projects with a finished-good archive are immutable: allocation changes and project deletion return `PROJECT_ARCHIVED` so the archived material trace remains stable.
 # Database migrations
 
 Set `DATABASE_URL` to the PostgreSQL Compose database, then run `pnpm --filter @leather-manager/api prisma:generate` after schema changes and `pnpm --filter @leather-manager/api prisma:migrate:deploy` when deploying an existing database. The checked-in migration is applied by the deploy command; do not use `db push` in deployment.

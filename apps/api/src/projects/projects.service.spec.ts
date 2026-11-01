@@ -72,6 +72,15 @@ describe('ProjectsService', () => {
     expect(db.allocations).toEqual([]);
   });
 
+  it('rejects allocation mutation and deletion for completed archived projects', async () => {
+    const db = new AllocationDatabase(); db.projectRecord.status = 'COMPLETED'; db.allocations.push({ id: 'allocation-1', projectId: 'project-1', materialId: 'material-1', quantity: '0.35' });
+    const service = new ProjectsService(db as never, new RecordingInventory() as never);
+    await expect(service.createAllocation('project-1', { materialId: 'material-1', quantity: '0.35' })).rejects.toThrow('PROJECT_ARCHIVED');
+    await expect(service.updateAllocation('project-1', 'allocation-1', { quantity: '0.40' })).rejects.toThrow('PROJECT_ARCHIVED');
+    await expect(service.removeAllocation('project-1', 'allocation-1')).rejects.toThrow('PROJECT_ARCHIVED');
+    await expect(service.remove('project-1')).rejects.toThrow('PROJECT_ARCHIVED');
+  });
+
   it('loads list finished goods with their source project and allocation material traceability', async () => {
     const db = new TraceListDatabase();
     await new ProjectsService(db as never, new RecordingInventory() as never).list();
@@ -110,7 +119,7 @@ class AllocationDatabase {
     delete: async ({ where }: any) => { this.allocations = this.allocations.filter((item) => item.id !== where.id); },
   };
   material = { findUnique: async () => ({ id: 'material-1' }) };
-  finishedGood = { create: async ({ data }: any) => (this.finishedGoodRecord = { id: 'good-1', ...data }) };
+  finishedGood = { create: async ({ data }: any) => (this.finishedGoodRecord = { id: 'good-1', ...data }), upsert: async ({ create }: any) => this.finishedGoodRecord ?? (this.finishedGoodRecord = { id: 'good-1', ...create }) };
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
     const snapshot = { allocations: this.allocations.map((allocation) => ({ ...allocation })), project: { ...this.projectRecord }, deleted: this.deleted, finishedGood: this.finishedGoodRecord };
     try { return await callback(this); }
