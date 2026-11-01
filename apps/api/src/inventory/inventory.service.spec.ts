@@ -19,6 +19,13 @@ describe('InventoryService', () => {
     expect(db.currentQuantity).toBe('2.00');
     expect(db.movements).toEqual([expect.objectContaining({ reason: 'ADJUSTMENT', quantityDelta: '1.00', note: '盘点' })]);
   });
+
+  it('uses conditional updateMany for a decrement and does not write history when it loses the race', async () => {
+    const db = new ConditionalFailureDatabase();
+    await expect(new InventoryService(db as never).changeBalance('material-1', { quantityDelta: '-1.00' })).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+    expect(db.updateManyArgs).toMatchObject({ where: { id: 'material-1', currentQuantity: { gte: '1.00' } } });
+    expect(db.movements).toHaveLength(0);
+  });
 });
 
 class BalanceDatabase {
@@ -37,6 +44,16 @@ class WritableBalanceDatabase {
   currentQuantity: string; movements: Array<Record<string, unknown>> = [];
   constructor(quantity: string) { this.currentQuantity = quantity; }
   material = { findUnique: async () => ({ id: 'material-1', currentQuantity: this.currentQuantity }), update: async ({ data }: { data: { currentQuantity: string } }) => { this.currentQuantity = data.currentQuantity; } };
+  inventoryMovement = { create: async ({ data }: { data: Record<string, unknown> }) => { this.movements.push(data); } };
+  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
+}
+
+class ConditionalFailureDatabase {
+  updateManyArgs: Record<string, unknown> | undefined; movements: Array<Record<string, unknown>> = [];
+  material = {
+    findUnique: async () => ({ id: 'material-1', currentQuantity: '1.00' }),
+    updateMany: async (args: Record<string, unknown>) => { this.updateManyArgs = args; return { count: 0 }; },
+  };
   inventoryMovement = { create: async ({ data }: { data: Record<string, unknown> }) => { this.movements.push(data); } };
   async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> { return callback(this); }
 }
