@@ -10,7 +10,7 @@ describe('Materials API (e2e)', () => {
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(MaterialsService).useValue({ create: (body: unknown) => body, list: () => [], remove: async (id: string) => { if (id === 'has-history') { const error = Object.assign(new Error('该材料仍有库存或出入库历史，无法删除。'), { code: 'MATERIAL_HAS_HISTORY' }); throw error; } } })
+      .overrideProvider(MaterialsService).useValue({ create: (body: unknown) => body, list: () => [], remove: async (id: string) => { if (id === 'has-history') { const error = Object.assign(new Error('该材料仍有库存或出入库历史，无法删除。'), { code: 'MATERIAL_HAS_HISTORY' }); throw error; } if (id === 'missing') throw new Error('MATERIAL_NOT_FOUND'); } })
       .overrideProvider(InventoryService).useValue({ changeBalance: async () => { throw new InsufficientStockError(); } })
       .compile();
     app = module.createNestApplication();
@@ -29,6 +29,12 @@ describe('Materials API (e2e)', () => {
     await request(app.getHttpServer()).delete('/api/v1/materials/has-history')
       .expect(409)
       .expect(({ body }) => { expect(body).toMatchObject({ code: 'MATERIAL_HAS_HISTORY', message: expect.stringContaining('无法删除') }); });
+  });
+
+  it('returns stable Chinese MATERIAL_NOT_FOUND for a missing material deletion', async () => {
+    await request(app.getHttpServer()).delete('/api/v1/materials/missing')
+      .expect(404)
+      .expect(({ body }) => { expect(body).toEqual(expect.objectContaining({ code: 'MATERIAL_NOT_FOUND', message: '未找到该材料。' })); });
   });
 });
 
